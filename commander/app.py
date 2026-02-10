@@ -35,7 +35,7 @@ def route_command(body_raw: str):
 
 def get_ai_fallback(body_raw: str):
     """
-    Groq llama-3.3-70b-versatile fallback.
+    Groq llama-3.1-8b-instant fallback.
     Used only when no command matches.
     Command-suggesting, not chatty.
     """
@@ -48,7 +48,7 @@ def get_ai_fallback(body_raw: str):
         )
 
         completion = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama-3.1-8b-instant",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": body_raw}
@@ -125,7 +125,7 @@ def route_command(body_raw: str):
 
 def get_ai_fallback(body_raw: str):
     """
-    Groq llama-3.3-70b-versatile fallback.
+    Groq llama-3.1-8b-instant fallback.
     Used only when no command matches.
     Command-suggesting, not chatty.
     """
@@ -138,7 +138,7 @@ def get_ai_fallback(body_raw: str):
         )
 
         completion = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama-3.1-8b-instant",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": body_raw}
