@@ -1,83 +1,62 @@
+# FILE: /home/martin/ansible/commander/app.py
 import os
 import logging
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 import ollama
-import config
-import actions
+import config # Registry now comes from here
 
 app = Flask(__name__)
 
-# Command Registry: maps keywords to handler functions
-KEYWORD_COMMANDS = {
-    'inspect': (actions.handle_inspect_command, ['inspect', 'motherboard', 'cpu', 'chip']),
-    'weather': (actions.handle_weather_command, ['weather']),
-    'disk': (actions.handle_disk_command, ['disk']),
-    'pingall': (actions.handle_pingall_command, ['pingall']),
-    'fleet': (actions.handle_fleet_command, ['fleet']),
-    'seed': (actions.handle_seed_command, ['seed']),
-}
-
-# Prefix Commands: require arguments after the command
-PREFIX_COMMANDS = {
-    'addtv': actions.handle_addtv_command,
-    'addmovies': actions.handle_addmovies_command,
-}
-
-
 def route_command(body):
-    """Route incoming message to appropriate command handler"""
+    """Route incoming message using registries defined in config.py"""
     
-    # Check prefix commands first (addtv, addmovies, etc.)
-    for prefix, handler in PREFIX_COMMANDS.items():
+    # Check prefix commands (addtv, addmovies)
+    for prefix, handler in config.PREFIX_COMMANDS.items():
         if body.startswith(f"{prefix} "):
             argument = body.replace(f"{prefix} ", "", 1).strip()
             return handler(argument)
     
-    # Check keyword commands (weather, disk, etc.)
-    for cmd_name, (handler, keywords) in KEYWORD_COMMANDS.items():
+    # Check keyword commands (weather, disk, fleet)
+    for cmd_name, (handler, keywords) in config.KEYWORD_COMMANDS.items():
         if any(keyword in body for keyword in keywords):
-            # Special case: seed command needs the full body
             if cmd_name == 'seed':
                 return handler(body)
             return handler()
     
-    # No command matched
     return None
 
-
 def get_ai_fallback(body):
-    """Get AI response from Ollama when no command matches"""
+    """AI Response Logic"""
     try:
         prompt = "You are Minty, a chill home-lab commander. Start with 'Minty: '."
         response = ollama.chat(
             model='llama3.2:3b',
-            messages=[
-                {'role': 'system', 'content': prompt},
-                {'role': 'user', 'content': body}
-            ]
+            messages=[{'role': 'system', 'content': prompt}, {'role': 'user', 'content': body}]
         )
         return response['message']['content']
     except Exception as e:
         logging.error(f"Ollama error: {e}")
-        return "Minty: Brain fog... give me a second! 🧠"
-
+        return "Minty: Brain fog... 🧠"
 
 @app.route("/webhook", methods=['POST'])
 def whatsapp_bot():
-    """Main webhook handler for incoming WhatsApp messages"""
-    
-    # Get incoming message
     body = (request.values.get('Body') or '').strip().lower()
-    
-    # Route to command or fallback to AI
     reply_text = route_command(body) or get_ai_fallback(body)
-    
-    # Send response via Twilio
     twiml = MessagingResponse()
     twiml.message(reply_text)
     return str(twiml)
 
-
 if __name__ == "__main__":
-    app.run(port=5000)
+    # Binding to 0.0.0.0:5000 for tunnel access
+    app.run(host='0.0.0.0', port=5000)
+
+########## EXPLANATION ##########
+# 1. config.py now acts as the 'Control Plane'. If you want to 
+#    add a new command (e.g., 'reboot'), you add it to the 
+#    dictionary in config.py without ever touching app.py.
+# 2. app.py remains purely the 'Data Plane'. It handles the 
+#    HTTP lifecycle, Twilio XML, and AI fallback.
+# 3. This structure prevents 'ImportErrors' because config.py 
+#    is already being imported by app.py, keeping the 
+#    dependency tree flat.
