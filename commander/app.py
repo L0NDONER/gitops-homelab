@@ -1,62 +1,180 @@
-# FILE: /home/martin/ansible/commander/app.py
-import os
 import logging
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
-import ollama
-import config # Registry now comes from here
+from groq import Groq
+import config
 
 app = Flask(__name__)
 
-def route_command(body):
-    """Route incoming message using registries defined in config.py"""
-    
-    # Check prefix commands (addtv, addmovies)
+# Single Groq client instance
+groq_client = Groq(api_key=config.GROQ_API_KEY)
+
+
+def route_command(body_raw: str):
+    """
+    Route incoming message using registries defined in config.py.
+    - Lowercase is used ONLY for matching
+    - Raw text is preserved for arguments
+    """
+    body = body_raw.lower().strip()
+
+    # Prefix commands (e.g. "ssh host", "ping 1.2.3.4")
     for prefix, handler in config.PREFIX_COMMANDS.items():
-        if body.startswith(f"{prefix} "):
-            argument = body.replace(f"{prefix} ", "", 1).strip()
-            return handler(argument)
-    
-    # Check keyword commands (weather, disk, fleet)
-    for cmd_name, (handler, keywords) in config.KEYWORD_COMMANDS.items():
-        if any(keyword in body for keyword in keywords):
-            if cmd_name == 'seed':
-                return handler(body)
+        token = f"{prefix} "
+        if body.startswith(token):
+            arg = body_raw.strip()[len(token):].strip()
+            return handler(arg)
+
+    # Keyword commands (status / hints)
+    for _, (handler, keywords) in config.KEYWORD_COMMANDS.items():
+        if any(k in body for k in keywords):
             return handler()
-    
+
     return None
 
-def get_ai_fallback(body):
-    """AI Response Logic"""
-    try:
-        prompt = "You are Minty, a chill home-lab commander. Start with 'Minty: '."
-        response = ollama.chat(
-            model='llama3.2:3b',
-            messages=[{'role': 'system', 'content': prompt}, {'role': 'user', 'content': body}]
-        )
-        return response['message']['content']
-    except Exception as e:
-        logging.error(f"Ollama error: {e}")
-        return "Minty: Brain fog... 🧠"
 
-@app.route("/webhook", methods=['POST'])
+def get_ai_fallback(body_raw: str):
+    """
+    Groq GPT-OSS-120B fallback.
+    Used only when no command matches.
+    Command-suggesting, not chatty.
+    """
+    try:
+        system_prompt = (
+            "You are Minty, a netops WhatsApp assistant. "
+            "Be concise. Prefer suggesting commands like: "
+            "ssh <host>, ping <host>, tailping <node>, tail. "
+            "Do not explain unless asked."
+        )
+
+        completion = groq_client.chat.completions.create(
+            model="gpt-oss-120b",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": body_raw}
+            ],
+            temperature=0.2,
+            max_tokens=120,
+        )
+
+        reply = completion.choices[0].message.content.strip()
+        return f"Minty: {reply}"
+
+    except Exception as e:
+        logging.error(f"Groq error: {e}")
+        return "Minty: Brain fog… 🧠"
+
+
+@app.route("/webhook", methods=["POST"])
 def whatsapp_bot():
-    body = (request.values.get('Body') or '').strip().lower()
-    reply_text = route_command(body) or get_ai_fallback(body)
+    body_raw = (request.values.get("Body") or "").strip()
+    from_number = request.values.get("From", "").replace("whatsapp:", "")
+
+    # Allowlist enforcement
+    if config.ALLOWED_NUMBERS and from_number not in config.ALLOWED_NUMBERS:
+        logging.warning(f"Blocked message from unauthorized number: {from_number}")
+        twiml = MessagingResponse()
+        twiml.message("⛔ Not authorised")
+        return str(twiml)
+
+    reply_text = route_command(body_raw) or get_ai_fallback(body_raw)
+
     twiml = MessagingResponse()
     twiml.message(reply_text)
     return str(twiml)
 
-if __name__ == "__main__":
-    # Binding to 0.0.0.0:5000 for tunnel access
-    app.run(host='0.0.0.0', port=5000)
 
-########## EXPLANATION ##########
-# 1. config.py now acts as the 'Control Plane'. If you want to 
-#    add a new command (e.g., 'reboot'), you add it to the 
-#    dictionary in config.py without ever touching app.py.
-# 2. app.py remains purely the 'Data Plane'. It handles the 
-#    HTTP lifecycle, Twilio XML, and AI fallback.
-# 3. This structure prevents 'ImportErrors' because config.py 
-#    is already being imported by app.py, keeping the 
-#    dependency tree flat.
+if __name__ == "__main__":
+    # Bind for tunnel access (Tailscale / SSH port forward)
+    app.run(host="0.0.0.0", port=5000)
+
+import logging
+from flask import Flask, request
+from twilio.twiml.messaging_response import MessagingResponse
+from groq import Groq
+import config
+
+app = Flask(__name__)
+
+# Single Groq client instance
+groq_client = Groq(api_key=config.GROQ_API_KEY)
+
+
+def route_command(body_raw: str):
+    """
+    Route incoming message using registries defined in config.py.
+    - Lowercase is used ONLY for matching
+    - Raw text is preserved for arguments
+    """
+    body = body_raw.lower().strip()
+
+    # Prefix commands (e.g. "ssh host", "ping 1.2.3.4")
+    for prefix, handler in config.PREFIX_COMMANDS.items():
+        token = f"{prefix} "
+        if body.startswith(token):
+            arg = body_raw.strip()[len(token):].strip()
+            return handler(arg)
+
+    # Keyword commands (status / hints)
+    for _, (handler, keywords) in config.KEYWORD_COMMANDS.items():
+        if any(k in body for k in keywords):
+            return handler()
+
+    return None
+
+
+def get_ai_fallback(body_raw: str):
+    """
+    Groq GPT-OSS-120B fallback.
+    Used only when no command matches.
+    Command-suggesting, not chatty.
+    """
+    try:
+        system_prompt = (
+            "You are Minty, a netops WhatsApp assistant. "
+            "Be concise. Prefer suggesting commands like: "
+            "ssh <host>, ping <host>, tailping <node>, tail. "
+            "Do not explain unless asked."
+        )
+
+        completion = groq_client.chat.completions.create(
+            model="gpt-oss-120b",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": body_raw}
+            ],
+            temperature=0.2,
+            max_tokens=120,
+        )
+
+        reply = completion.choices[0].message.content.strip()
+        return f"Minty: {reply}"
+
+    except Exception as e:
+        logging.error(f"Groq error: {e}")
+        return "Minty: Brain fog… 🧠"
+
+
+@app.route("/webhook", methods=["POST"])
+def whatsapp_bot():
+    body_raw = (request.values.get("Body") or "").strip()
+    from_number = request.values.get("From", "").replace("whatsapp:", "")
+
+    # Allowlist enforcement
+    if config.ALLOWED_NUMBERS and from_number not in config.ALLOWED_NUMBERS:
+        logging.warning(f"Blocked message from unauthorized number: {from_number}")
+        twiml = MessagingResponse()
+        twiml.message("⛔ Not authorised")
+        return str(twiml)
+
+    reply_text = route_command(body_raw) or get_ai_fallback(body_raw)
+
+    twiml = MessagingResponse()
+    twiml.message(reply_text)
+    return str(twiml)
+
+
+if __name__ == "__main__":
+    # Bind for tunnel access (Tailscale / SSH port forward)
+    app.run(host="0.0.0.0", port=5000)
+
