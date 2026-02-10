@@ -3,7 +3,7 @@ import os
 
 # Import your network/tunnel handlers.
 # Create actions_net.py with the matching functions, or rename your existing actions file.
-import actions_net as actions
+import actions
 
 # Base Paths
 BASE_DIR = os.path.expanduser('~/ansible')
