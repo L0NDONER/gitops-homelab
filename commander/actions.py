@@ -3,7 +3,7 @@ import psutil
 import os
 import json
 import requests
-from . import config
+import config
 
 def handle_disk_command():
     try:
