@@ -3,9 +3,8 @@ import logging
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 import ollama
-
-from . import config
-from . import actions
+import config
+import actions
 
 app = Flask(__name__)
 
